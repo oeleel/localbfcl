@@ -1,5 +1,6 @@
 import os
 import random
+import re
 import time
 from typing import Optional
 from urllib.parse import urlparse
@@ -37,7 +38,48 @@ class WebSearchAPI:
         self._random = random.Random(337)
         # This one is used to determine the content of the error message
         self._rng = random.Random(1053)
+        
+        # Random insertion perturbation configuration
+        self._enable_random_insertion = os.getenv("BFCL_ENABLE_RANDOM_INSERTION", "false").lower() == "true"
+        self._random_insertion_rate = float(os.getenv("BFCL_RANDOM_INSERTION_RATE", "0.05"))
+        self._random_insertion_text_pool = os.getenv(
+            "BFCL_RANDOM_INSERTION_TEXT_POOL",
+            "ADVERTISEMENT,[Sponsored],[Promoted],[Click here],[Learn more],...,***"
+        ).split(",")
+        # Use a separate random generator for perturbations to keep it reproducible if needed
+        self._perturb_rng = random.Random(42)
 
+    def _apply_random_insertion(self, text: str) -> str:
+        """
+        Apply random text insertion perturbation to the given text.
+        
+        Args:
+            text: The text to perturb
+            
+        Returns:
+            The text with random insertions applied
+        """
+        if not self._enable_random_insertion or not text:
+            return text
+        
+        # Split text into words (preserving whitespace)
+        # Use regex to split on whitespace while keeping the separators
+        parts = re.split(r'(\s+)', text)
+        
+        # Apply random insertion
+        perturbed_parts = []
+        for part in parts:
+            perturbed_parts.append(part)
+            # Only insert after non-whitespace parts
+            if part and not part.isspace():
+                # Randomly decide to insert
+                if self._perturb_rng.random() < self._random_insertion_rate:
+                    insertion_text = self._perturb_rng.choice(self._random_insertion_text_pool)
+                    # Insert with a space before and after
+                    perturbed_parts.append(" " + insertion_text + " ")
+        
+        return "".join(perturbed_parts)
+    
     def _load_scenario(self, initial_config: dict, long_context: bool = False):
         # We don't care about the long_context parameter here
         # It's there to match the signature of functions in the multi-turn evaluation code
@@ -192,11 +234,13 @@ class WebSearchAPI:
         results = []
         for result in search_results[:max_results]:
             if self.show_snippet:
+                # Apply random insertion perturbation to the body/snippet
+                body = self._apply_random_insertion(result["snippet"])
                 results.append(
                     {
                         "title": result["title"],
                         "href": result["link"],
-                        "body": result["snippet"],
+                        "body": body,
                     }
                 )
             else:
@@ -257,12 +301,14 @@ class WebSearchAPI:
 
             # Process the response based on the mode
             if mode == "raw":
-                return {"content": response.text}
+                content = self._apply_random_insertion(response.text)
+                return {"content": content}
 
             elif mode == "markdown":
                 converter = html2text.HTML2Text()
                 markdown = converter.handle(response.text)
-                return {"content": markdown}
+                content = self._apply_random_insertion(markdown)
+                return {"content": content}
 
             elif mode == "truncate":
                 soup = BeautifulSoup(response.text, "html.parser")
@@ -273,7 +319,8 @@ class WebSearchAPI:
 
                 # Extract and clean text
                 text = soup.get_text(separator="\n", strip=True)
-                return {"content": text}
+                content = self._apply_random_insertion(text)
+                return {"content": content}
             else:
                 raise ValueError(f"Unsupported mode: {mode}")
 
