@@ -1,0 +1,17 @@
+.env variables that affect perturbation results: 
+
+BFCL_ENABLE_RANDOM_INSERTION=true
+
+BFCL_RANDOM_INSERTION_RATE=0.50
+
+BFCL_RANDOM_INSERTION_TEXT_POOL="ADVERTISEMENT,[Sponsored],[Promoted],[Click here],[Learn more],...,***"
+
+
+generating evaluation models:
+
+bfcl generate \
+  --model gpt-4o-mini-2024-07-18-FC,gpt-4.1-mini-2025-04-14-FC \
+  --test-category web_search \
+  --num-threads 1 \
+  --allow-overwrite
+

@@ -139,9 +139,26 @@ If you are running any proprietary models, make sure the model API keys are incl
 
 The library looks for the `.env` file in the project root, i.e. `$BFCL_PROJECT_ROOT/.env`.
 
-#### Configuring SerpAPI for Web Search Category
+#### Configuring Web Search API for Web Search Category
 
-For the `web_search` test category, we use the [SerpAPI](https://serpapi.com/) service to perform web search. You need to sign up for an API key and add it to your `.env` file. You can also switch to other web search APIs by changing the `search_engine_query` function in `bfcl_eval/eval_checker/multi_turn_eval/func_source_code/web_search.py`.
+For the `web_search` test category, you can use either [Serper.dev](https://serper.dev/) (recommended) or [SerpAPI](https://serpapi.com/) to perform web search. 
+
+**Option 1: Serper.dev (Recommended)**
+- Sign up at [serper.dev](https://serper.dev/) and get your API key
+- Add to your `.env` file:
+  ```bash
+  SERPER_API_KEY=your_serper_api_key_here
+  ```
+- Benefits: Faster responses, lower cost, Google Search results
+
+**Option 2: SerpAPI (Fallback)**
+- Sign up at [serpapi.com](https://serpapi.com/) and get your API key
+- Add to your `.env` file:
+  ```bash
+  SERPAPI_API_KEY=your_serpapi_key_here
+  ```
+
+The system will automatically use Serper.dev if `SERPER_API_KEY` is set, otherwise it will fall back to SerpAPI if `SERPAPI_API_KEY` is set. If neither is set, web search will return empty results.
 
 ---
 

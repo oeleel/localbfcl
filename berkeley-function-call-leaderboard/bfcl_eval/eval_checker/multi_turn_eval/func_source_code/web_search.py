@@ -173,6 +173,136 @@ class WebSearchAPI:
             - 'href' (str): The URL of the search result.
             - 'body' (str): A brief description or snippet from the search result.
         """
+        # Check which API to use (prefer Serper.dev if available)
+        serper_api_key = os.getenv("SERPER_API_KEY")
+        serpapi_key = os.getenv("SERPAPI_API_KEY")
+        
+        use_serper = serper_api_key is not None
+        
+        if use_serper:
+            # Serper.dev implementation
+            return self._search_with_serper(keywords, max_results, region)
+        elif serpapi_key:
+            # SerpAPI implementation (fallback)
+            return self._search_with_serpapi(keywords, max_results, region)
+        else:
+            # No API key configured
+            error_msg = "No search API key configured. Please set either SERPER_API_KEY or SERPAPI_API_KEY in your .env file."
+            print(f"❗️❗️ [WebSearchAPI] {error_msg}")
+            # Return empty list instead of error dict to avoid empty response errors
+            return []
+
+    def _search_with_serper(
+        self,
+        keywords: str,
+        max_results: Optional[int] = 10,
+        region: Optional[str] = "wt-wt",
+    ) -> list:
+        """Search using Serper.dev API."""
+        backoff = 2  # initial back-off in seconds
+        serper_api_key = os.getenv("SERPER_API_KEY")
+        
+        url = "https://google.serper.dev/search"
+        headers = {
+            "X-API-KEY": serper_api_key,
+            "Content-Type": "application/json"
+        }
+        
+        # Serper.dev uses country codes, but we'll pass gl (country) and hl (language) if needed
+        # For now, we'll use the query as-is since region mapping is complex
+        payload = {
+            "q": keywords,
+            "num": min(max_results, 10),  # Serper.dev supports up to 10 results per request
+        }
+        
+        # Infinite retry loop with exponential backoff
+        while True:
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=30)
+                response.raise_for_status()
+                search_results = response.json()
+                
+            except requests.exceptions.HTTPError as e:
+                if response.status_code == 429:
+                    wait_time = backoff + random.uniform(0, backoff)
+                    error_block = (
+                        "*" * 100
+                        + f"\n❗️❗️ [WebSearchAPI] Received 429 from Serper.dev. Rate limit exceeded. Retrying in {wait_time:.1f} seconds…"
+                        + "*" * 100
+                    )
+                    print(error_block)
+                    time.sleep(wait_time)
+                    backoff = min(backoff * 2, 120)
+                    continue
+                else:
+                    error_block = (
+                        "*" * 100
+                        + f"\n❗️❗️ [WebSearchAPI] Error from Serper.dev (HTTP {response.status_code}): {str(e)}. This is not a rate-limit error, so it will not be retried."
+                        + "*" * 100
+                    )
+                    print(error_block)
+                    # Return empty list instead of error dict to avoid empty response errors
+                    return []
+            except Exception as e:
+                error_block = (
+                    "*" * 100
+                    + f"\n❗️❗️ [WebSearchAPI] Error from Serper.dev: {str(e)}. This is not a rate-limit error, so it will not be retried."
+                    + "*" * 100
+                )
+                print(error_block)
+                # Return empty list instead of error dict to avoid empty response errors
+                return []
+            
+            break  # Success
+        
+        # Parse Serper.dev response format
+        # Serper.dev returns results in "organic" key
+        if "organic" not in search_results or not search_results["organic"]:
+            # Return empty list instead of error dict to avoid empty response errors
+            return []
+        
+        organic_results = search_results["organic"]
+        
+        # Convert to the desired format matching BFCL expectations
+        results = []
+        for result in organic_results[:max_results]:
+            # Ensure all required fields exist with defaults to avoid KeyError
+            title = result.get("title", "")
+            link = result.get("link", "")
+            snippet = result.get("snippet", "")
+            
+            # Ensure title and link are not empty (required fields)
+            if not title or not link:
+                continue  # Skip invalid results
+            
+            if self.show_snippet:
+                # Apply random insertion perturbation to the body/snippet
+                body = self._apply_random_insertion(snippet) if snippet else ""
+                results.append(
+                    {
+                        "title": title,
+                        "href": link,
+                        "body": body,
+                    }
+                )
+            else:
+                results.append(
+                    {
+                        "title": title,
+                        "href": link,
+                    }
+                )
+        
+        # Always return a list, even if empty, to avoid empty response errors
+        return results
+
+    def _search_with_serpapi(
+        self,
+        keywords: str,
+        max_results: Optional[int] = 10,
+        region: Optional[str] = "wt-wt",
+    ) -> list:
+        """Search using SerpAPI (original implementation)."""
         backoff = 2  # initial back-off in seconds
         params = {
             "engine": "duckduckgo",
@@ -206,7 +336,8 @@ class WebSearchAPI:
                         + "*" * 100
                     )
                     print(error_block)
-                    return {"error": str(e)}
+                    # Return empty list instead of error dict to avoid empty response errors
+                    return []
 
             # SerpAPI sometimes returns the error in the payload instead of raising
             if "error" in search_results and "429" in str(search_results["error"]):
@@ -223,34 +354,43 @@ class WebSearchAPI:
 
             break  # Success – no rate-limit error detected
 
-        if "organic_results" not in search_results:
-            return {
-                "error": "Failed to retrieve the search results from server. Please try again later."
-            }
+        if "organic_results" not in search_results or not search_results["organic_results"]:
+            # Return empty list instead of error dict to avoid empty response errors
+            return []
 
         search_results = search_results["organic_results"]
 
         # Convert the search results to the desired format
         results = []
         for result in search_results[:max_results]:
+            # Ensure all required fields exist with defaults to avoid KeyError
+            title = result.get("title", "")
+            link = result.get("link", "")
+            snippet = result.get("snippet", "")
+            
+            # Ensure title and link are not empty (required fields)
+            if not title or not link:
+                continue  # Skip invalid results
+            
             if self.show_snippet:
                 # Apply random insertion perturbation to the body/snippet
-                body = self._apply_random_insertion(result["snippet"])
+                body = self._apply_random_insertion(snippet) if snippet else ""
                 results.append(
                     {
-                        "title": result["title"],
-                        "href": result["link"],
+                        "title": title,
+                        "href": link,
                         "body": body,
                     }
                 )
             else:
                 results.append(
                     {
-                        "title": result["title"],
-                        "href": result["link"],
+                        "title": title,
+                        "href": link,
                     }
                 )
 
+        # Always return a list, even if empty, to avoid empty response errors
         return results
 
     def fetch_url_content(self, url: str, mode: str = "raw") -> str:
